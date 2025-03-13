@@ -13,7 +13,7 @@ HUGGINGFACE_REPO_ID="mistralai/Mistral-7B-Instruct-v0.3"
 def load_llm(huggingface_repo_id):
     llm=HuggingFaceEndpoint(
         repo_id=huggingface_repo_id,
-        temperature=0.5,
+        temperature=0.01,
         model_kwargs={"token":HF_TOKEN,
                       "max_length":"512"}
     )
@@ -45,7 +45,7 @@ db=FAISS.load_local(DB_FAISS_PATH, embedding_model, allow_dangerous_deserializat
 qa_chain=RetrievalQA.from_chain_type(
     llm=load_llm(HUGGINGFACE_REPO_ID),
     chain_type="stuff",
-    retriever=db.as_retriever(search_kwargs={'k':3}),
+    retriever=db.as_retriever(search_kwargs={'k':5}),
     return_source_documents=True,
     chain_type_kwargs={'prompt':set_custom_prompt(CUSTOM_PROMPT_TEMPLATE)}
 )

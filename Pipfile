@@ -6,9 +6,9 @@ name = "pypi"
 [packages]
 langchain = "*"
 langchain-community = "*"
-langchain-huggingface = "*"
 faiss-cpu = "*"
 pytesseract = "*"
+langchain-huggingface = "*"
 
 [dev-packages]
 
