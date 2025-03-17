@@ -139,6 +139,7 @@ def main():
 
     # Combine all documents (PDF + database + images)
     all_documents = pdf_documents + db_documents + image_documents
+    # all_documents = db_documents 
     print(f"Total combined documents: {len(all_documents)}")
 
     if not all_documents:
