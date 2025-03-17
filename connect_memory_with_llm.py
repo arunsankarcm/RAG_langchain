@@ -1,5 +1,6 @@
 import os
 import psycopg2
+import re
 from typing import List, Dict, Any
 
 from langchain_huggingface import HuggingFaceEndpoint
@@ -63,7 +64,50 @@ def query_database(user_query):
         result_text += "\n".join([f"{col}: {val}" for col, val in row_dict.items()])
         result_text += "\n\n"
     
-    return result_text
+    return result_text, rows, column_names
+
+# Function to perform advanced data analysis and calculations
+def analyze_data(user_query, rows, column_names):
+    """Perform calculations and analysis on the data to supplement LLM reasoning"""
+    analysis_results = ""
+    
+    # Extract employee data for easier processing
+    employees = [dict(zip(column_names, row)) for row in rows]
+    
+    # Check if query is about name lengths
+    name_length_patterns = [
+        r"longer name",
+        r"longest name",
+        r"shortest name",
+        r"shorter name",
+        r"name length",
+        r"more characters",
+        r"comparing names"
+    ]
+    
+    if any(re.search(pattern, user_query.lower()) for pattern in name_length_patterns):
+        # Calculate name lengths for all employees
+        name_lengths = [(emp["name"], len(emp["name"])) for emp in employees]
+        name_lengths.sort(key=lambda x: x[1], reverse=True)
+        
+        analysis_results += "Name Length Analysis:\n"
+        for name, length in name_lengths:
+            analysis_results += f"- {name}: {length} characters\n"
+        
+        # Extract specific names being compared if present
+        specific_names = []
+        for emp in employees:
+            if emp["name"].lower() in user_query.lower():
+                specific_names.append(emp["name"])
+        
+        if len(specific_names) >= 2:
+            analysis_results += "\nDirect Comparison:\n"
+            for name in specific_names:
+                analysis_results += f"- {name}: {len(name)} characters\n"
+    
+    # Can add more analysis types here (salary comparisons, date calculations, etc.)
+    
+    return analysis_results
 
 # Function to get relevant content from vector store
 def query_vector_store(vector_db, user_query, k=3):
@@ -98,10 +142,14 @@ Database Information:
 PDF and Image Information:
 {pdf_image_results}
 
+Data Analysis (Use these exact calculations for numerical questions):
+{data_analysis}
+
 Chat History: {chat_history}
 Question: {question}
 
 Start the answer directly. No small talk please. Indicate which source(s) you used to answer the question.
+When comparing numerical values or lengths, always refer to the Data Analysis section for exact calculations.
 """
 
 # Create memory
@@ -114,7 +162,7 @@ memory = ConversationBufferMemory(
 # Create prompt template
 prompt = PromptTemplate(
     template=CUSTOM_PROMPT_TEMPLATE,
-    input_variables=["db_results", "pdf_image_results", "chat_history", "question"]
+    input_variables=["db_results", "pdf_image_results", "data_analysis", "chat_history", "question"]
 )
 
 # Create LLM chain
@@ -145,7 +193,10 @@ while True:
         break
     
     # Get database results for every query
-    db_results = query_database(user_query)
+    db_results, rows, column_names = query_database(user_query)
+    
+    # Perform data analysis
+    data_analysis = analyze_data(user_query, rows, column_names)
     
     # Get relevant content from PDFs and images
     pdf_image_results = query_vector_store(vector_db, user_query)
@@ -154,6 +205,7 @@ while True:
     response = llm_chain.invoke({
         "db_results": db_results,
         "pdf_image_results": pdf_image_results,
+        "data_analysis": data_analysis,
         "question": user_query
     })
     

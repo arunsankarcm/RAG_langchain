@@ -138,8 +138,8 @@ def main():
     print(f"Loaded {len(image_documents)} image document(s).")
 
     # Combine all documents (PDF + database + images)
-    all_documents = pdf_documents + db_documents + image_documents
-    # all_documents = db_documents 
+    # all_documents = pdf_documents + db_documents + image_documents
+    all_documents = db_documents 
     print(f"Total combined documents: {len(all_documents)}")
 
     if not all_documents:
