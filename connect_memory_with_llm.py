@@ -1,57 +1,96 @@
 import os
-
-from langchain_huggingface import HuggingFaceEndpoint
+from langchain.llms.base import LLM
 from langchain_core.prompts import PromptTemplate
-from langchain.chains import RetrievalQA
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
+from langchain.chains import LLMChain
+from langchain.memory import ConversationBufferMemory
+from google import genai
+from typing import Optional, List
+from pydantic import Field
+from load_postgres_data import load_postgres_data
 
-# Step 1: Setup LLM (Mistral with HuggingFace)
-HF_TOKEN=os.environ.get("HF_TOKEN")
-HUGGINGFACE_REPO_ID="mistralai/Mistral-7B-Instruct-v0.3"
+GEMINI_API_KEY = "AIzaSyAbDKUXZyvMFqtcTiso82wT8qnr6YAoCBw"
 
-def load_llm(huggingface_repo_id):
-    llm=HuggingFaceEndpoint(
-        repo_id=huggingface_repo_id,
-        temperature=0.01,
-        model_kwargs={"token":HF_TOKEN,
-                      "max_length":"512"}
-    )
-    return llm
+class GeminiFlashLLM(LLM):
+    model: str = Field(default="gemini-2.0-flash")
+    temperature: float = Field(default=0.1)
+    max_length: int = Field(default=512)
+    client: Optional[any] = None
 
-# Step 2: Connect LLM with FAISS and Create chain
+    @property
+    def _llm_type(self) -> str:
+        return "gemini_flash"
 
+    def __init__(self, **data):
+        super().__init__(**data)
+        self.client = genai.Client(api_key=GEMINI_API_KEY, http_options={"api_version": "v1alpha"})
+
+    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=[prompt],
+            config={
+                "temperature": self.temperature,
+                "max_output_tokens": self.max_length  
+            }
+        )
+        return response.text
+
+# Improved prompt template
 CUSTOM_PROMPT_TEMPLATE = """
-Use the pieces of information provided in the context to answer user's question.
-If you dont know the answer, just say that you dont know, dont try to make up an answer. 
-Dont provide anything out of the given context
+You have structured data about employees provided below. Read through it carefully and answer explicitly and precisely based ONLY on this data.
+If asked comparative questions, carefully compare all relevant entries explicitly before answering.
+If you don't find the answer explicitly within the provided data, reply "I don't know."
 
-Context: {context}
-Question: {question}
+Employee Data:
+{context}
 
-Start the answer directly. No small talk please.
+Question:
+{question}
+
+Explicit Answer:
 """
 
-def set_custom_prompt(custom_prompt_template):
-    prompt=PromptTemplate(template=custom_prompt_template, input_variables=["context", "question"])
-    return prompt
 
-# Load Database
-DB_FAISS_PATH="vectorstore/db_faiss"
-embedding_model=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-db=FAISS.load_local(DB_FAISS_PATH, embedding_model, allow_dangerous_deserialization=True)
+# Load and format PostgreSQL data explicitly
+HOST, PORT, DBNAME, USER, PASSWORD = "127.0.0.1", 5432, "travel_rag", "postgres", "experion@123"
+SQL_QUERY = "SELECT name, department, email, salary, join_date FROM employees;"
 
-# Create QA chain
-qa_chain=RetrievalQA.from_chain_type(
-    llm=load_llm(HUGGINGFACE_REPO_ID),
-    chain_type="stuff",
-    retriever=db.as_retriever(search_kwargs={'k':5}),
-    return_source_documents=True,
-    chain_type_kwargs={'prompt':set_custom_prompt(CUSTOM_PROMPT_TEMPLATE)}
+db_documents = load_postgres_data(HOST, PORT, DBNAME, USER, PASSWORD, SQL_QUERY)
+
+# Helper function to format context
+def format_documents_for_context(docs):
+    return "\n".join(doc.page_content for doc in docs)
+
+# Create memory
+memory = ConversationBufferMemory(
+    memory_key="chat_history",
+    return_messages=True,
+    input_key="question",
+    output_key="answer"
 )
 
-# Now invoke with a single query
-user_query=input("Write Query Here: ")
-response=qa_chain.invoke({'query': user_query})
-print("RESULT: ", response["result"])
-print("SOURCE DOCUMENTS: ", response["source_documents"])
+# Set up the LLM chain
+qa_chain = LLMChain(
+    llm=GeminiFlashLLM(),
+    prompt=PromptTemplate(
+        template=CUSTOM_PROMPT_TEMPLATE,
+        input_variables=["context", "question"]
+    ),
+    memory=memory,
+    output_key="answer"
+)
+
+# Interactive loop
+while True:
+    user_query = input("Write Query Here (type 'exit' to quit): ")
+    if user_query.lower() == 'exit':
+        break
+
+    context = format_documents_for_context(db_documents)
+    response = qa_chain.invoke({
+        'context': context,
+        'question': user_query
+    })
+    print("\nRESULT:", response["answer"])
+
+    print("\n" + "-"*50 + "\n")
